@@ -1,0 +1,10 @@
+# Terraform state files contain sensitive data and are environment-specific.
+# They must never be committed to Git.
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+crash.log
+
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored — it should be
+# committed so everyone gets the same provider version (like package-lock.json).

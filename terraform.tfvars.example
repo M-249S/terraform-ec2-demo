@@ -1,0 +1,13 @@
+# Copy this file to terraform.tfvars and adjust values for your own use.
+# terraform.tfvars is git-ignored — real values (like a restricted SSH CIDR)
+# never need to be committed.
+#
+# Usage: cp terraform.tfvars.example terraform.tfvars
+
+aws_region        = "eu-north-1"
+instance_type     = "t3.micro"
+project_name      = "terraform-demo"
+
+# Restrict this to your own IP for anything beyond a disposable demo,
+# e.g. "203.0.113.5/32". Find your IP with: curl ifconfig.me
+allowed_ssh_cidr  = "0.0.0.0/0"
