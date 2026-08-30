@@ -1,0 +1,47 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fmt-and-validate:
+    name: Format & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.0"
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      # No AWS credentials needed here: -backend=false skips remote state,
+      # and validate only checks syntax/types, never talks to AWS.
+      - name: Init (no backend, no credentials needed)
+        run: terraform init -backend=false
+
+      - name: Validate
+        run: terraform validate
+
+  iac-security-scan:
+    name: IaC Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: fmt-and-validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy config scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: 1

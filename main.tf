@@ -30,6 +30,13 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Both ingress rules below deliberately allow 0.0.0.0/0:
+#   - HTTP (80): this is a public web server by design — that's correct,
+#     not a misconfiguration.
+#   - SSH (22): defaults open for zero-friction first-time use in a demo
+#     repo. Restrict it via `allowed_ssh_cidr` in terraform.tfvars for
+#     anything beyond a throwaway exercise (see README "Security notes").
+#trivy:ignore:AVD-AWS-0107
 resource "aws_security_group" "web_sg" {
   name        = "${var.project_name}-sg"
   description = "Allow SSH and HTTP access"
