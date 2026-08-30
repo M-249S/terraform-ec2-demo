@@ -57,6 +57,11 @@ resource "aws_security_group" "web_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Egress is intentionally unrestricted: the instance needs outbound
+  # internet access during boot to run `apt-get update`/`apt-get install
+  # nginx` via user_data. Narrowing this would require a curated allowlist
+  # of package-mirror IPs, which is impractical and fragile for a demo.
+  #trivy:ignore:AVD-AWS-0104
   egress {
     from_port   = 0
     to_port     = 0
@@ -73,6 +78,18 @@ resource "aws_instance" "demo_server" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   vpc_security_group_ids = [aws_security_group.web_sg.id]
+
+  # Require IMDSv2 (session-token-based metadata access) instead of the
+  # optional v1 default — closes a well-known SSRF-to-credential-theft path.
+  metadata_options {
+    http_tokens   = "required"
+    http_endpoint = "enabled"
+  }
+
+  # Encrypt the root EBS volume at rest.
+  root_block_device {
+    encrypted = true
+  }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
     project_name = var.project_name
