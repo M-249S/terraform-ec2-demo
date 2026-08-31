@@ -1,14 +1,17 @@
 # Terraform AWS EC2 Demo
 
-A minimal, reusable Terraform configuration that provisions a security-grouped
-EC2 instance on AWS, boots it with a working web server via `user_data`, and
-is fully parametrized through variables — no values are hardcoded into the
-resource definitions.
+A reusable, security-conscious Terraform configuration that provisions an
+EC2 instance on AWS and boots it running a real containerized application —
+the Flask API from a [companion DevSecOps CI/CD
+project](https://github.com/M-249S/devops-cicd-project), pulled live from
+GitHub Container Registry.
 
-Built as a hands-on companion to a [DevSecOps CI/CD Flask
-project](https://github.com/M-249S/devops-cicd-project), practicing
-Infrastructure as Code fundamentals: `plan` → `apply` → verify → `destroy`,
-with real AWS resources and real cleanup discipline.
+This isn't two disconnected exercises. The full chain is proven to work
+end-to-end: code push → CI/CD (lint, test, SAST, secret scan, dependency
+scan) → Docker image published to GHCR → Terraform provisions AWS
+infrastructure → the instance pulls and runs that exact image → the API
+answers real requests on a public IP → `terraform destroy` tears it all
+back down cleanly.
 
 ## What this creates
 
@@ -16,9 +19,11 @@ with real AWS resources and real cleanup discipline.
 - One **EC2 instance** (Free Tier eligible `t3.micro` by default), running
   the latest official Ubuntu 22.04 AMI — looked up dynamically, never
   hardcoded, so it doesn't go stale
-- A **`user_data` boot script** that installs nginx and serves a page
-  confirming the instance was provisioned by Terraform, including the
-  project name and boot timestamp
+- A **`user_data` boot script** that installs Docker, then pulls and runs
+  the Flask app image from GHCR — with the same hardening (`--read-only`,
+  `--tmpfs /tmp`) used in that project's own local `docker-compose` setup,
+  and the app's `API_KEY` injected at container runtime only, never baked
+  into the image or written to disk
 
 ## Structure
 
@@ -29,6 +34,7 @@ with real AWS resources and real cleanup discipline.
 | `outputs.tf` | Instance ID, public IP, and a ready-to-open test URL |
 | `user_data.sh.tpl` | Boot script template, rendered with `templatefile()` |
 | `terraform.tfvars.example` | Template for overriding defaults locally (never commit the real `terraform.tfvars`) |
+| `.github/workflows/terraform.yml` | CI: format check, validate, and an IaC security scan — no AWS credentials required |
 
 ## Usage
 
@@ -43,8 +49,8 @@ To customize instead of using the defaults:
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars — e.g. change project_name, or restrict
-# allowed_ssh_cidr to your own IP instead of 0.0.0.0/0
+# edit terraform.tfvars — e.g. change project_name, restrict
+# allowed_ssh_cidr to your own IP, or point docker_image at a different tag
 terraform plan
 ```
 
@@ -53,9 +59,14 @@ eligible — AWS resources):
 
 ```bash
 terraform apply
-# wait ~30-60s after apply completes for user_data to finish running
+# wait ~60-90s after apply completes: the instance needs to boot, install
+# Docker, pull the image from GHCR, and start the container
 # then open the printed test_url in a browser
 ```
+
+Once it's up, the same endpoints from the Flask project itself all work
+against the live instance: `/`, `/health`, `/items`, `/metrics`,
+`/config-status`.
 
 **Always clean up after testing:**
 
@@ -71,12 +82,35 @@ aws ec2 describe-instances \
   --output table
 ```
 
+## CI
+
+`.github/workflows/terraform.yml` runs on every push and pull request:
+
+1. **Format & Validate** — `terraform fmt -check` and `terraform validate`.
+   Deliberately uses `terraform init -backend=false`, so this stage needs
+   **no AWS credentials at all** — it never talks to AWS.
+2. **IaC Security Scan (Trivy)** — scans the `.tf` files themselves for
+   misconfigurations before anything is ever provisioned.
+
 ## Security notes
 
+- **IMDSv2 is required** (`http_tokens = "required"`) — closes a
+  well-known path from SSRF to instance-credential theft via the metadata
+  service.
+- **Root EBS volume is encrypted at rest.**
 - `allowed_ssh_cidr` defaults to `0.0.0.0/0` (open to the internet) for
   frictionless first-time use. For anything beyond a disposable demo,
   override it in `terraform.tfvars` with your own IP (`curl ifconfig.me`)
   in `/32` form.
+- **Egress is intentionally open** — the instance needs outbound access to
+  install Docker and pull the image from GHCR on boot. Documented and
+  scanner-suppressed (`#trivy:ignore:AVD-AWS-0104`) rather than silently
+  ignored.
+- **The GHCR package is public**, so the instance can `docker pull` it
+  with zero credentials. This is a deliberate trade-off for a demo project
+  with no sensitive data in the image — in a real production setup, the
+  instance would instead assume an IAM role and pull via AWS Secrets
+  Manager or a private registry with scoped credentials.
 - `.tfstate` files, `.tfvars` (the real one, not `.example`), and the
   `.terraform/` directory are all git-ignored — Terraform state can contain
   sensitive data and should never be committed.
@@ -85,13 +119,18 @@ aws ec2 describe-instances \
   `package-lock.json`).
 - IAM access used to run this was a dedicated `terraform-user` with
   `AdministratorAccess`, not the AWS account's root user.
+- `app_api_key` is marked `sensitive = true` — Terraform hides it (and, as
+  a result, the entire rendered `user_data` script) from plan/apply output
+  automatically.
 
 ## What I'd add next
 
 - Remote state (S3 backend + DynamoDB locking) instead of local `.tfstate`
-- A `.github/workflows` CI job running `terraform fmt -check` and
-  `terraform validate` on every push
-- Connect this to the Flask project — provision infrastructure that
-  actually pulls and runs the Docker image from GHCR instead of nginx
+- Replace the public-GHCR-package approach with an IAM instance role +
+  scoped pull credentials, closer to a real production pattern
+- Pin `trivy-action` to a commit SHA instead of `@master` (same open item
+  as the Flask project)
+- An Application Load Balancer + ACM certificate instead of a bare HTTP
+  instance, so the demo isn't served over plain HTTP
 - Restrict the default security group's SSH rule rather than defaulting
   it open

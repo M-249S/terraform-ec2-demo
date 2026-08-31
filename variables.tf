@@ -27,3 +27,16 @@ variable "ubuntu_ami_name_filter" {
   type        = string
   default     = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
 }
+
+variable "docker_image" {
+  description = "The GHCR image (owner lowercased) to pull and run on boot. Must be a public package, or the instance needs registry credentials that this config does not provide."
+  type        = string
+  default     = "ghcr.io/m-249s/devops-cicd-project:latest"
+}
+
+variable "app_api_key" {
+  description = "Value injected as API_KEY into the running container at boot — never baked into the image or written to a persistent file. Override in terraform.tfvars; never commit a real value."
+  type        = string
+  default     = "demo-value-override-me"
+  sensitive   = true
+}

@@ -59,8 +59,9 @@ resource "aws_security_group" "web_sg" {
 
   # Egress is intentionally unrestricted: the instance needs outbound
   # internet access during boot to run `apt-get update`/`apt-get install
-  # nginx` via user_data. Narrowing this would require a curated allowlist
-  # of package-mirror IPs, which is impractical and fragile for a demo.
+  # docker.io` and to pull the app image from GHCR via user_data. Narrowing
+  # this would require a curated allowlist of package-mirror and registry
+  # IPs, which is impractical and fragile for a demo.
   #trivy:ignore:AVD-AWS-0104
   egress {
     from_port   = 0
@@ -93,6 +94,8 @@ resource "aws_instance" "demo_server" {
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
     project_name = var.project_name
+    docker_image = var.docker_image
+    app_api_key  = var.app_api_key
   })
 
   tags = {

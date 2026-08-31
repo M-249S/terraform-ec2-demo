@@ -1,24 +1,22 @@
 #!/bin/bash
 # This runs once, automatically, the first time the instance boots.
-# It installs nginx and serves a small confirmation page — proof that
-# Terraform didn't just create an empty server, but a working one.
+# It installs Docker, then pulls and runs the Flask app image built and
+# published by the companion CI/CD pipeline (devops-cicd-project on GHCR).
 set -euo pipefail
 
 apt-get update -y
-apt-get install -y nginx
+apt-get install -y docker.io
+systemctl enable docker
+systemctl start docker
 
-cat > /var/www/html/index.html << HTML
-<!DOCTYPE html>
-<html>
-<head><title>${project_name}</title></head>
-<body style="font-family: sans-serif; text-align: center; margin-top: 10%;">
-  <h1>It's alive!</h1>
-  <p>This EC2 instance was provisioned entirely by Terraform.</p>
-  <p><strong>Project:</strong> ${project_name}</p>
-  <p><strong>Provisioned at:</strong> $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
-</body>
-</html>
-HTML
-
-systemctl enable nginx
-systemctl restart nginx
+# Same hardening used when running this image locally in the Flask repo's
+# own docker-compose stack: read-only root filesystem, /tmp as tmpfs, and
+# the secret injected at runtime only — never baked into the image.
+docker run -d \
+  --name ${project_name}-app \
+  --restart unless-stopped \
+  -p 80:5000 \
+  --read-only \
+  --tmpfs /tmp \
+  -e API_KEY="${app_api_key}" \
+  ${docker_image}
