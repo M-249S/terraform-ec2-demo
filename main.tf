@@ -1,11 +1,25 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.11.0" # use_lockfile requires 1.10+; GA (non-experimental) from 1.11
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+  }
+
+  # Remote state: shared and versioned in S3, instead of a local file only
+  # one machine knows about. Locking uses S3's own native conditional-write
+  # locking (use_lockfile) — the modern approach, no DynamoDB table needed.
+  # The bucket is provisioned separately (see README "Remote state setup"),
+  # not by this config itself, since Terraform can't manage the backend it
+  # depends on to run.
+  backend "s3" {
+    bucket       = "terraform-state-417633266916"
+    key          = "terraform-ec2-demo/terraform.tfstate"
+    region       = "eu-north-1"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 

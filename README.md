@@ -82,18 +82,63 @@ aws ec2 describe-instances \
   --output table
 ```
 
+## Remote state setup
+
+State lives in S3, not on any one machine, with native S3 locking
+(`use_lockfile`) so concurrent `apply` runs can't corrupt it. The bucket
+and its settings are provisioned **once, manually** — Terraform can't
+manage the backend it depends on to run (a chicken-and-egg problem), so
+this is a deliberate bootstrap step, not something this config creates
+itself.
+
+```bash
+# Create the state bucket
+aws s3api create-bucket \
+  --bucket terraform-state-<your-aws-account-id> \
+  --region eu-north-1 \
+  --create-bucket-configuration LocationConstraint=eu-north-1
+
+# Version it (recover a prior state if something goes wrong)
+aws s3api put-bucket-versioning \
+  --bucket terraform-state-<your-aws-account-id> \
+  --versioning-configuration Status=Enabled
+
+# Encrypt it at rest
+aws s3api put-bucket-encryption \
+  --bucket terraform-state-<your-aws-account-id> \
+  --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+# Block all public access, unconditionally
+aws s3api put-public-access-block \
+  --bucket terraform-state-<your-aws-account-id> \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+```
+
+Then update the `backend "s3"` block in `main.tf` with your bucket name
+and run `terraform init -migrate-state`.
+
+**Note:** this project initially used the older DynamoDB-table locking
+pattern, then migrated to S3-native locking (`use_lockfile = true`) after
+hitting Terraform's own deprecation warning for `dynamodb_table` — one
+fewer AWS resource to manage, and the currently recommended approach.
+
 ## CI
 
 `.github/workflows/terraform.yml` runs on every push and pull request:
 
 1. **Format & Validate** — `terraform fmt -check` and `terraform validate`.
    Deliberately uses `terraform init -backend=false`, so this stage needs
-   **no AWS credentials at all** — it never talks to AWS.
+   **no AWS credentials at all** — it never talks to AWS or the state
+   bucket.
 2. **IaC Security Scan (Trivy)** — scans the `.tf` files themselves for
    misconfigurations before anything is ever provisioned.
 
 ## Security notes
 
+- **State is remote** (S3, encrypted, versioned, S3-native locked) instead
+  of a local file — see "Remote state setup" above.
 - **IMDSv2 is required** (`http_tokens = "required"`) — closes a
   well-known path from SSRF to instance-credential theft via the metadata
   service.
@@ -125,7 +170,6 @@ aws ec2 describe-instances \
 
 ## What I'd add next
 
-- Remote state (S3 backend + DynamoDB locking) instead of local `.tfstate`
 - Replace the public-GHCR-package approach with an IAM instance role +
   scoped pull credentials, closer to a real production pattern
 - Pin `trivy-action` to a commit SHA instead of `@master` (same open item
