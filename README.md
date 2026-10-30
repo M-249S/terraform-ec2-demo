@@ -11,7 +11,8 @@ end-to-end: code push → CI/CD (lint, test, SAST, secret scan, dependency
 scan) → Docker image published to GHCR → Terraform provisions AWS
 infrastructure → the instance pulls and runs that exact image → the API
 answers real requests on a public IP → `terraform destroy` tears it all
-back down cleanly.
+back down cleanly. (The companion pipeline has since gained an OWASP ZAP
+DAST stage, added after this end-to-end run.)
 
 ## What this creates
 
@@ -133,7 +134,8 @@ fewer AWS resource to manage, and the currently recommended approach.
    **no AWS credentials at all** — it never talks to AWS or the state
    bucket.
 2. **IaC Security Scan (Trivy)** — scans the `.tf` files themselves for
-   misconfigurations before anything is ever provisioned.
+   misconfigurations before anything is ever provisioned. The scanner
+   action is pinned to a full commit SHA (see Security notes).
 
 ## Security notes
 
@@ -143,6 +145,11 @@ fewer AWS resource to manage, and the currently recommended approach.
   well-known path from SSRF to instance-credential theft via the metadata
   service.
 - **Root EBS volume is encrypted at rest.**
+- **The scanner action is pinned to a commit SHA, not a tag or branch.**
+  `trivy-action` is pinned to the commit of release v0.35.0. In March 2026
+  almost all of that action's version tags were force-pushed to malicious
+  code (GHSA-69fq-xp46-6x23), and v0.35.0 was the release that stayed
+  safe. Tags and branches can be moved, a commit SHA cannot.
 - `allowed_ssh_cidr` defaults to `0.0.0.0/0` (open to the internet) for
   frictionless first-time use. For anything beyond a disposable demo,
   override it in `terraform.tfvars` with your own IP (`curl ifconfig.me`)
@@ -172,9 +179,11 @@ fewer AWS resource to manage, and the currently recommended approach.
 
 - Replace the public-GHCR-package approach with an IAM instance role +
   scoped pull credentials, closer to a real production pattern
-- Pin `trivy-action` to a commit SHA instead of `@master` (same open item
-  as the Flask project)
+- Pin the remaining GitHub Actions (`checkout`, `setup-terraform`) to
+  commit SHAs as well
 - An Application Load Balancer + ACM certificate instead of a bare HTTP
   instance, so the demo isn't served over plain HTTP
 - Restrict the default security group's SSH rule rather than defaulting
   it open
+- Replace the `AdministratorAccess` policy on `terraform-user` with a
+  least-privilege policy scoped to the resources this config manages
