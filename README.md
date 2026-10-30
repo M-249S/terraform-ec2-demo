@@ -14,6 +14,9 @@ answers real requests on a public IP → `terraform destroy` tears it all
 back down cleanly. (The companion pipeline has since gained an OWASP ZAP
 DAST stage, added after this end-to-end run.)
 
+See [SECURITY.md](SECURITY.md) for the security controls, the known gaps, and
+what the CI scan does and does not cover.
+
 ## What this creates
 
 - One **security group** allowing SSH (port 22) and HTTP (port 80)
@@ -36,6 +39,7 @@ DAST stage, added after this end-to-end run.)
 | `user_data.sh.tpl` | Boot script template, rendered with `templatefile()` |
 | `terraform.tfvars.example` | Template for overriding defaults locally (never commit the real `terraform.tfvars`) |
 | `.github/workflows/terraform.yml` | CI: format check, validate, and an IaC security scan — no AWS credentials required |
+| `SECURITY.md` | Security controls, known gaps, and a mapping to the OWASP Top 10:2025 |
 
 ## Usage
 
@@ -134,8 +138,8 @@ fewer AWS resource to manage, and the currently recommended approach.
    **no AWS credentials at all** — it never talks to AWS or the state
    bucket.
 2. **IaC Security Scan (Trivy)** — scans the `.tf` files themselves for
-   misconfigurations before anything is ever provisioned. The scanner
-   action is pinned to a full commit SHA (see Security notes).
+   misconfigurations before anything is ever provisioned. Every action in
+   the workflow is pinned to a full commit SHA (see Security notes).
 
 ## Security notes
 
@@ -145,15 +149,18 @@ fewer AWS resource to manage, and the currently recommended approach.
   well-known path from SSRF to instance-credential theft via the metadata
   service.
 - **Root EBS volume is encrypted at rest.**
-- **The scanner action is pinned to a commit SHA, not a tag or branch.**
+- **GitHub Actions are pinned to commit SHAs, not tags or branches.**
   `trivy-action` is pinned to the commit of release v0.35.0. In March 2026
   almost all of that action's version tags were force-pushed to malicious
   code (GHSA-69fq-xp46-6x23), and v0.35.0 was the release that stayed
-  safe. Tags and branches can be moved, a commit SHA cannot.
+  safe. Tags and branches can be moved, a commit SHA cannot. The other
+  actions (`checkout`, `setup-terraform`) are pinned the same way.
 - `allowed_ssh_cidr` defaults to `0.0.0.0/0` (open to the internet) for
   frictionless first-time use. For anything beyond a disposable demo,
   override it in `terraform.tfvars` with your own IP (`curl ifconfig.me`)
-  in `/32` form.
+  in `/32` form. The scanner finding for open ingress
+  (`#trivy:ignore:AVD-AWS-0107`) is suppressed in `main.tf`, so a clean
+  Trivy scan does not mean the security group is locked down.
 - **Egress is intentionally open** — the instance needs outbound access to
   install Docker and pull the image from GHCR on boot. Documented and
   scanner-suppressed (`#trivy:ignore:AVD-AWS-0104`) rather than silently
@@ -179,8 +186,7 @@ fewer AWS resource to manage, and the currently recommended approach.
 
 - Replace the public-GHCR-package approach with an IAM instance role +
   scoped pull credentials, closer to a real production pattern
-- Pin the remaining GitHub Actions (`checkout`, `setup-terraform`) to
-  commit SHAs as well
+- Add Dependabot to keep the pinned action SHAs current
 - An Application Load Balancer + ACM certificate instead of a bare HTTP
   instance, so the demo isn't served over plain HTTP
 - Restrict the default security group's SSH rule rather than defaulting
